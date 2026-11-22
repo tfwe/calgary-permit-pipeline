@@ -1,0 +1,3 @@
+# Test dependencies. Runtime deps live in requirements.txt.
+#   uv pip install --python .venv/bin/python -r requirements-dev.txt
+pytest==8.4.2
