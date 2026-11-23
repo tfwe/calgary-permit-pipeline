@@ -38,6 +38,16 @@ review, export and audit functions the live pipeline uses, so it exercises the
 output stage end to end. Only the Socrata ingest and web enrichment are skipped,
 because they need the network.
 
+## Results
+
+- Demo run (synthetic data, fully offline, no API keys): 38 leads total (master=38).
+- Segments: needs_builder=18, subtrade=16, review=2, policy_excluded=2.
+- Contact coverage: needs_builder 18 with phone/email 18; subtrade 16 with phone/email 16.
+- QA gate: reported "no problems found".
+- The live pipeline's SQLite cache holds around 300 companies.
+- Tests: around 2,900 lines of tests pin recall behaviour with network access blocked, so changes to recall show up as test failures.
+- Not covered by the demo: live Socrata ingest and web enrichment, which need network access.
+
 ## Architecture
 
 ```
