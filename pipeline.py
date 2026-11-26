@@ -21,23 +21,20 @@ Outputs (regenerated every run; see README):
   calgary_needs_builder.csv   sellable: GC / early-design leads
   calgary_subtrade_leads.csv  sellable: subtrade leads
   calgary_needs_review.csv    not sellable as-is, with the reason why
+  calgary_needs_builder.html  client sheet: GC / early-design leads (tiered cards)
+  calgary_subtrade_leads.html client sheet: subtrade leads (tiered cards)
   cache.db                    SQLite enrichment cache (age-based TTL)
 
 Secrets are read from ~/.config/serper.env and ~/.config/gogcli/exec-env.sh,
 so the pipeline does not depend on the caller's shell or PATH. Run it through
 run.sh (or run-weekly.sh) rather than directly.
 
-Exit codes: EXIT_* below. Entry point: main().
+Exit codes: EXIT_* live in cpp_config.py. Entry point: main().
 """
 from __future__ import annotations
 
 import argparse
-import base64
-import csv
-import html
 import json
-import logging
-import logging.handlers
 import os
 import re
 import sqlite3
@@ -45,18 +42,11 @@ import subprocess
 import sys
 import tempfile
 import time
-from collections import Counter
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from pathlib import Path
-from urllib.parse import parse_qs, quote_plus, urljoin, urlparse
+from urllib.parse import urljoin, urlparse
 
 import config
-
-import httpx
-from bs4 import BeautifulSoup
-from pydantic import BaseModel, Field
-from rich.console import Console
-from rich.table import Table
 
 from cpp_config import *
 from cpp_cache import *
@@ -64,21 +54,6 @@ from cpp_match import *
 from cpp_fetch import *
 from cpp_contacts import *
 from cpp_export import *
-
-# ---------------------------------------------------------------------------
-# Paths and exit codes
-# ---------------------------------------------------------------------------
-
-
-# ---------------------------------------------------------------------------
-# Data model
-# ---------------------------------------------------------------------------
-
-
-# ---------------------------------------------------------------------------
-# Small shared helpers
-# ---------------------------------------------------------------------------
-
 
 # ---------------------------------------------------------------------------
 # SQLite enrichment cache
@@ -120,22 +95,7 @@ def init_db() -> sqlite3.Connection:
 
 
 # ---------------------------------------------------------------------------
-# Calgary business-licence lookup
-# ---------------------------------------------------------------------------
-
-
-# ---------------------------------------------------------------------------
-# Keyless search fallbacks (DuckDuckGo / Bing)
-# ---------------------------------------------------------------------------
-
-
-# ---------------------------------------------------------------------------
-# Enrichment: places lookup, phone/email normalisation
-# ---------------------------------------------------------------------------
-
-
-# ---------------------------------------------------------------------------
-# Logging, cache freshness, email grading
+# Cache freshness and email grading
 # ---------------------------------------------------------------------------
 
 

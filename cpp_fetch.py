@@ -1,5 +1,5 @@
 """Network, search and licence layer: Socrata, licence lookup, keyless search,
-Serper, and the page fetcher. Moved verbatim from pipeline.py (patch 4 of 6)."""
+Serper, and the page fetcher. Moved verbatim from pipeline.py."""
 from __future__ import annotations
 
 import base64
@@ -102,12 +102,6 @@ def load_dynamic_tract_builders(conn: sqlite3.Connection, days: int = 365,
     return len(_DYNAMIC_TRACT_BUILDERS)
 
 
-
-
-
-
-
-
 # ---------------------------------------------------------------------------
 # Socrata ingestion
 # ---------------------------------------------------------------------------
@@ -128,10 +122,6 @@ def socrata(url: str, params: dict, retries: int = 3) -> list:
             last_err = exc
         time.sleep(1.5 * (attempt + 1))
     raise RuntimeError(f"Socrata request failed for {url}: {last_err}")
-
-
-
-
 
 
 def fetch_building_permits(days: int = 14, limit: int = 300,
@@ -234,8 +224,6 @@ def is_active_licence(row: dict) -> bool:
     return False
 
 
-
-
 def licence_lookup(company: str, address: str) -> dict:
     """Return {unmasked_tradename, licence_type, active, matched_by} or empty dict."""
     company_u = clean(company).upper().replace("'", "''")
@@ -311,8 +299,6 @@ def decode_ddg_href(href: str) -> str | None:
             return qs["uddg"][0]
         return None
     return href
-
-
 
 
 # deprecated: keyless engines are blocked from datacenter IPs; kept only as a last resort.

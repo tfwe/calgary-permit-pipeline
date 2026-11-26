@@ -1,6 +1,6 @@
 """Shared constants, the Lead model, and small pure helpers for the Calgary pipeline.
 
-Split out of pipeline.py (patch 1 of 6). Names are re-exported there via
+Split out of pipeline.py. Names are re-exported there via
 `from cpp_config import *`, so `pipeline.<name>` keeps working.
 """
 from __future__ import annotations

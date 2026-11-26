@@ -19,6 +19,40 @@ from cpp_config import *
 from cpp_cache import *
 from cpp_match import *
 
+__all__ = [
+    "pitch_for",
+    "export_csv",
+    "export_clean_client_csv",
+    "review_reason",
+    "select_review",
+    "OGL_FOOTER",
+    "COMMERCIAL_HINTS",
+    "_is_commercial_lead",
+    "_tel_href",
+    "_maps_href",
+    "CLIENT_ROLE_INBOXES",
+    "CLIENT_PITCH_CHIPS",
+    "CLIENT_SHEET_CSS",
+    "CLIENT_GROUP_HEADINGS",
+    "_client_esc",
+    "_client_is_role",
+    "client_tier",
+    "_client_money",
+    "_client_scope",
+    "_client_reach",
+    "_client_chip",
+    "_client_extra_lines",
+    "_client_card",
+    "_client_row",
+    "export_client_html",
+    "export_review_csv",
+    "print_summary",
+    "_csv_values",
+    "dedupe_leads",
+    "_reachable",
+    "filter_client_splits",
+]
+
 def pitch_for(lead_type: str, permit_stage: str = "", company_name: str = "") -> str:
     if lead_type == "SUBTRADE_PITCH" and permit_stage == "DEVELOPMENT_PERMIT":
         return "Pre-construction subtrade opportunity — development permit filed, trades not yet awarded"
@@ -37,8 +71,6 @@ def pitch_for(lead_type: str, permit_stage: str = "", company_name: str = "") ->
         "EARLY_DESIGN": "Pre-construction outreach — development permit at design stage",
         "SUBCONTRACTOR": "Trade already active — not a buyer of subtrade services",
     }.get(lead_type, "Permit-based B2B outreach")
-
-
 
 
 # ---------------------------------------------------------------------------
@@ -159,7 +191,7 @@ def _maps_href(address: str) -> str:
     return f"https://www.google.com/maps/search/?api=1&query={query}"
 
 
-# Client sheet: tiered cards (prototype proto_cards5.py). Role inboxes and tier
+# Client sheet: tiered cards. Role inboxes and tier
 # rules live here so tests can exercise them directly.
 CLIENT_ROLE_INBOXES = frozenset({
     "info", "contact", "admin", "office", "sales", "hello", "enquiries", "inquiries",
@@ -521,15 +553,9 @@ def print_summary(leads: list[Lead]) -> None:
     console.print("[bold]By lead type:[/bold] " + ", ".join(f"{k}={v}" for k, v in sorted(by_type.items())))
 
 
-
-
-
-
 def _csv_values(path: Path) -> list[list[str]]:
     with path.open(newline="", encoding="utf-8") as fh:
         return [row for row in csv.reader(fh)]
-
-
 
 
 def dedupe_leads(leads: list[Lead]) -> list[Lead]:
@@ -598,37 +624,3 @@ def filter_client_splits(leads: list[Lead], include_tract_builders: bool = False
     # SUBCONTRACTOR rows are excluded from both client lists by design.
     return gc_leads, sub_leads
 
-
-__all__ = [
-    "pitch_for",
-    "export_csv",
-    "export_clean_client_csv",
-    "review_reason",
-    "select_review",
-    "OGL_FOOTER",
-    "COMMERCIAL_HINTS",
-    "_is_commercial_lead",
-    "_tel_href",
-    "_maps_href",
-    "CLIENT_ROLE_INBOXES",
-    "CLIENT_PITCH_CHIPS",
-    "CLIENT_SHEET_CSS",
-    "CLIENT_GROUP_HEADINGS",
-    "_client_esc",
-    "_client_is_role",
-    "client_tier",
-    "_client_money",
-    "_client_scope",
-    "_client_reach",
-    "_client_chip",
-    "_client_extra_lines",
-    "_client_card",
-    "_client_row",
-    "export_client_html",
-    "export_review_csv",
-    "print_summary",
-    "_csv_values",
-    "dedupe_leads",
-    "_reachable",
-    "filter_client_splits",
-]

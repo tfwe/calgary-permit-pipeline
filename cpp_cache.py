@@ -1,11 +1,12 @@
-"""Pure SQLite storage helpers for the enrichment cache (extracted from pipeline.py)."""
+"""Pure SQLite storage helpers for the enrichment cache (extracted from pipeline.py).
+
+Note: init_db() intentionally remains in pipeline.py because tests patch P.DB_PATH.
+"""
 from __future__ import annotations
 
 import re
 import sqlite3
 from datetime import datetime, timezone
-
-from cpp_config import *  # noqa: F401,F403
 
 __all__ = [
     "CONTACT_COLUMNS",
