@@ -63,6 +63,30 @@ except Exception as _e:  # noqa: BLE001
 check("print_summary runs without raising", _summary_err is None)
 check("print_summary prints the 'Leads:' line", "Leads:" in _summary_out.getvalue())
 
+# --- sheet-state persistence lives in the pipeline namespace -------------------
+# gog_sync/gog_sync_file are defined in pipeline.py and resolve these helpers
+# through its globals. The helpers must be defined there too, not re-exported from
+# cpp_export, so tests and callers see one consistent definition. The module check
+# runs first and has no filesystem side effects. The roundtrip only runs if it holds.
+check_eq("sheet-state helpers are defined in pipeline",
+         P._save_sheet_state.__module__, P.__name__)
+if P._save_sheet_state.__module__ == P.__name__:
+    import tempfile as _tempfile
+    _orig_state_path = P.SHEETS_STATE_PATH
+    _state_dir = Path(_tempfile.mkdtemp(prefix="_test_sheet_state_"))
+    _probe_path = _state_dir / "state.json"
+    try:
+        P.SHEETS_STATE_PATH = _probe_path
+        P._save_sheet_state({"probe": "1"})
+        check("sheet state file is written", _probe_path.exists())
+        check_eq("sheet state roundtrips through the pipeline helpers",
+                 P._load_sheet_state(), {"probe": "1"})
+    finally:
+        P.SHEETS_STATE_PATH = _orig_state_path
+        for _p in _state_dir.glob("*"):
+            _p.unlink()
+        _state_dir.rmdir()
+
 # --- exit codes are distinct so an unattended runner can alert by class ------
 check_eq("exit codes are unique",
          len({P.EXIT_OK, P.EXIT_NO_PERMITS, P.EXIT_CONFIG, P.EXIT_LOW_YIELD, P.EXIT_UPLOAD}), 5)

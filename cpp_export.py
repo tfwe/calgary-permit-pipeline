@@ -13,7 +13,6 @@ from datetime import datetime
 from pathlib import Path
 from urllib.parse import quote_plus
 
-import config
 from rich.table import Table
 
 from cpp_config import *
@@ -524,21 +523,6 @@ def print_summary(leads: list[Lead]) -> None:
 
 
 
-SHEETS_STATE_PATH = config.SHEETS_STATE_PATH  # set CALGARY_LEADS_SHEETS_STATE to override
-
-
-def _load_sheet_state() -> dict:
-    try:
-        return json.loads(SHEETS_STATE_PATH.read_text(encoding="utf-8"))
-    except Exception:  # noqa: BLE001
-        return {}
-
-
-def _save_sheet_state(state: dict) -> None:
-    SHEETS_STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
-    SHEETS_STATE_PATH.write_text(json.dumps(state, indent=2), encoding="utf-8")
-
-
 
 
 def _csv_values(path: Path) -> list[list[str]]:
@@ -643,9 +627,6 @@ __all__ = [
     "export_client_html",
     "export_review_csv",
     "print_summary",
-    "SHEETS_STATE_PATH",
-    "_load_sheet_state",
-    "_save_sheet_state",
     "_csv_values",
     "dedupe_leads",
     "_reachable",

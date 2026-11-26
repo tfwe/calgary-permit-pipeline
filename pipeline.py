@@ -405,6 +405,21 @@ def build_leads(conn: sqlite3.Connection, permits: list[dict], refresh: bool = F
     return leads
 
 
+SHEETS_STATE_PATH = config.SHEETS_STATE_PATH  # set CALGARY_LEADS_SHEETS_STATE to override
+
+
+def _load_sheet_state() -> dict:
+    try:
+        return json.loads(SHEETS_STATE_PATH.read_text(encoding="utf-8"))
+    except Exception:  # noqa: BLE001
+        return {}
+
+
+def _save_sheet_state(state: dict) -> None:
+    SHEETS_STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    SHEETS_STATE_PATH.write_text(json.dumps(state, indent=2), encoding="utf-8")
+
+
 # ---------------------------------------------------------------------------
 # Google Sheets sync (gog), stable URLs
 # ---------------------------------------------------------------------------
