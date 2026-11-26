@@ -21,6 +21,8 @@
   "leads_before": 12,
   "leads_after": 10,
   "rollup_companies": 1,
+  "rollup_extra_permits": 2,
+  "rollup_suffix_visible": true,
   "rollup_example": [
    {
     "company": "BROOKFIELD RESIDENTIAL (ALBERTA)",
@@ -28,6 +30,13 @@
     "combined_value": 721230.24
    }
   ]
+ },
+ "coverage": {
+  "companies": 10,
+  "named_contacts": 0,
+  "verified_emails": 0,
+  "role_only_emails": 1,
+  "blanks": 9
  },
  "splits": {
   "needs_builder": 3,

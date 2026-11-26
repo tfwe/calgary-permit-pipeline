@@ -22,7 +22,22 @@ scans the bodies afterwards to prove the key value appears nowhere in the
 committed file. Replay and CI never need the real Serper key and run fully
 offline; a constant placeholder value passes the client-side gate only.
 
-Replay hard-verifies, and exits non-zero if any check fails:
+Replay hard-verifies, and exits non-zero if any check fails: every HTTP request
+served from a cassette, zero real connections, a cache-only second pass, and
+byte-identical evidence versus the committed run.
+
+Known fidelity limits, accepted by design (a record/replay pair must be
+self-consistent; both sides behave identically):
+- fetch_page's User-Agent fallback chain is not part of the cassette key, so a
+  URL retried across UAs replays the last recorded attempt's body for every
+  attempt. Terminal outcomes are unchanged because the stored body is the last
+  attempt's.
+- Transport errors recorded as HTTP 599 abort fetch_page on the first UA
+  instead of walking the chain; production's _FETCH_RETRYABLE path and a 599
+  abort end with the same no-body outcome.
+- Redirects are followed inside the record transport, so cpp_fetch._fetch_once
+  sees the pre-redirect URL in r.url while receiving the final body. Record and
+  replay see the same URL/body pair.
 
   * every HTTP request was served from a cassette (a miss raises), and a socket
     guard turns any real connection attempt into an error, so "offline" is
@@ -59,8 +74,11 @@ sys.path.insert(0, str(REPO))
 import httpx  # noqa: E402
 
 from cpp_config import HEADERS, days_ago_iso  # noqa: E402
-from cpp_cache import cache_key  # noqa: E402
+import cpp_cache as CC  # noqa: E402
+import cpp_contacts as C  # noqa: E402
 import pipeline as P  # noqa: E402
+
+cache_key = CC.cache_key  # hot alias used throughout
 
 CASSETTES = REPO / "fixtures" / "http" / "cassettes.json"
 OUTDIR = REPO / "recorded_demo"
@@ -114,10 +132,21 @@ class CassetteStore:
 _RealClient = httpx.Client  # captured before the global patch below
 
 
+class OfflineViolation(BaseException):
+    """Raised when the demo tries the network while it must be offline.
+
+    BaseException, deliberately: pipeline code has broad `except Exception`
+    fallbacks (cpp_contacts.domain_has_mx, cpp_fetch.ddg_search,
+    pipeline.scrape_contacts) that would swallow a plain RuntimeError and
+    silently degrade the evidence. An OfflineViolation propagates through
+    them and kills the run.
+    """
+
+
 BODY_CAP = 120_000  # per recorded response, spliced head+tail (see below)
 
 
-def cap_body(body: bytes) -> bytes:
+def cap_body(body: bytes, content_type: str = "") -> bytes:
     """Cap a recorded response body at BODY_CAP bytes.
 
     Real company pages bury contact blocks under megabytes of inline base64
@@ -126,13 +155,20 @@ def cap_body(body: bytes) -> bytes:
     bytes everywhere: the record run parses exactly these bytes, so replay sees
     precisely what the record run parsed. Contact details normally live in the
     page header or footer, which the splice keeps.
+
+    HTML only: splicing a JSON document would corrupt json(), and no Socrata
+    JSON response in practice exceeds the cap. Sliced on decoded character
+    boundaries so a multi-byte UTF-8 sequence is never cut.
     """
     if len(body) <= BODY_CAP:
         return body
+    if "html" not in content_type.lower():
+        return body
+    text = body.decode("utf-8", errors="replace")
     half = BODY_CAP // 2
-    return (body[:half]
-            + b"\n<!-- recorded-demo: body cap splice, middle trimmed -->\n"
-            + body[-half:])
+    return (text[:half]
+            + "\n<!-- recorded-demo: body cap splice, middle trimmed -->\n"
+            + text[-half:]).encode("utf-8")
 
 
 class RecordTransport(httpx.BaseTransport):
@@ -153,7 +189,8 @@ class RecordTransport(httpx.BaseTransport):
                                  headers=request.headers, content=request.read())
             with _RealClient(timeout=40, follow_redirects=True) as client:
                 r = client.send(real, follow_redirects=True)
-            status, ctype, body = r.status_code, r.headers.get("content-type", ""), cap_body(r.content)
+            status, ctype, body = r.status_code, r.headers.get("content-type", ""), \
+                cap_body(r.content, r.headers.get("content-type", ""))
         except httpx.HTTPError as exc:
             status, ctype, body = 599, "text/plain", f"transport error: {exc}".encode()
         self.served += 1
@@ -174,7 +211,10 @@ class ReplayTransport(httpx.BaseTransport):
         entry = self.store.entries.get(key)
         if entry is None:
             self.misses.append(key)
-            raise RuntimeError(
+            # OfflineViolation, not RuntimeError: pipeline fallbacks catch
+            # Exception broadly (cpp_fetch.socrata even retries RuntimeError),
+            # and a swallowed miss would silently degrade the evidence.
+            raise OfflineViolation(
                 f"cassette miss ({len(self.misses)} so far): {key}\n"
                 f"cassette file holds {len(self.store.entries)} entries")
         self.served += 1
@@ -206,9 +246,10 @@ def install_transport(store: CassetteStore, mode: str) -> "RecordTransport | Rep
 # ---------------------------------------------------------------------------
 # Time freezing
 # ---------------------------------------------------------------------------
-def freeze_time(cassette: CassetteStore) -> None:
-    """Pin days_ago_iso (Socrata cutoffs) and cpp_fetch's now() (licence
-    expiry) to the values captured at record time."""
+def freeze_time(cassette: CassetteStore):
+    """Pin days_ago_iso (Socrata cutoffs) and the datetime objects (licence
+    expiry, cache stamps) to the values captured at record time. Returns a
+    restore() callable that puts the original module attributes back."""
     frozen = cassette.meta["frozen_days_ago_iso"]
 
     def _frozen_days_ago(days: int) -> str:
@@ -225,33 +266,69 @@ def freeze_time(cassette: CassetteStore) -> None:
             dt = frozen_now if frozen_now.tzinfo else frozen_now.replace(tzinfo=timezone.utc)
             return dt.astimezone(tz) if tz else dt.replace(tzinfo=None)
 
+    saved: dict = {}
     for name in ("cpp_config", "cpp_cache", "cpp_match", "cpp_fetch", "cpp_contacts",
                  "cpp_export", "pipeline"):
         mod = sys.modules.get(name)
         if mod is None:
             continue
         if hasattr(mod, "days_ago_iso"):
+            saved[(name, "days_ago_iso")] = mod.days_ago_iso
             setattr(mod, "days_ago_iso", _frozen_days_ago)
-        if name == "cpp_fetch" and hasattr(mod, "datetime"):
+        if name in ("cpp_fetch", "cpp_cache", "pipeline") and hasattr(mod, "datetime"):
+            # cpp_cache stamps updated_at / ages cache rows with datetime; pipeline
+            # logs and stamps event records with it. Freeze all three so cache
+            # freshness (cpp_cache._cache_age_days via pipeline._cache_is_fresh) is
+            # identical no matter when the replay runs.
+            saved[(name, "datetime")] = mod.datetime
             setattr(mod, "datetime", _FrozenDatetime)
+
+    def restore() -> None:
+        for (name, attr), value in saved.items():
+            setattr(sys.modules[name], attr, value)
+
+    return restore
 
 
 def no_network_guard():
-    """Context manager making any real connection attempt a loud error."""
+    """Context manager making any real connection attempt a loud error.
+
+    Every blocked call is recorded in self.blocked, and the replay asserts the
+    list is empty -- a violation swallowed somewhere upstream still fails the
+    run at the end.
+    """
     def _blocked(*_a, **_k):
-        raise RuntimeError("the recorded demo is offline; the pipeline tried the network")
+        raise OfflineViolation("the recorded demo is offline; the pipeline tried the network")
 
     class _Guard:
+        def __init__(self):
+            self.blocked: list[str] = []
+
+        def _tracked(self, label):
+            def _b(*_a, **_k):
+                self.blocked.append(label)
+                raise OfflineViolation(f"the recorded demo is offline; the pipeline called {label}")
+            return _b
+
         def __enter__(self):
-            self._connect = socket.socket.connect
-            self._getaddrinfo = socket.getaddrinfo
-            socket.socket.connect = _blocked
-            socket.getaddrinfo = _blocked
+            self._saves = {}
+            for name in ("connect", "connect_ex", "sendto"):
+                self._saves[name] = getattr(socket.socket, name)
+                setattr(socket.socket, name, self._tracked(f"socket.{name}"))
+
+            self._saves["getaddrinfo"] = socket.getaddrinfo
+            socket.getaddrinfo = self._tracked("socket.getaddrinfo")
+
+            self._saves["create_connection"] = socket.create_connection
+            socket.create_connection = self._tracked("socket.create_connection")
             return self
 
         def __exit__(self, *_a):
-            socket.socket.connect = self._connect
-            socket.getaddrinfo = self._getaddrinfo
+            setattr(socket.socket, "connect", self._saves["connect"])
+            setattr(socket.socket, "connect_ex", self._saves["connect_ex"])
+            setattr(socket.socket, "sendto", self._saves["sendto"])
+            socket.getaddrinfo = self._saves["getaddrinfo"]
+            socket.create_connection = self._saves["create_connection"]
             return False
 
     return _Guard()
@@ -267,6 +344,8 @@ def choose_targets(permits: list[dict], cap: int) -> list[str]:
     the last), so the dedupe stage always has a genuine multi-permit roll-up to
     prove, whatever the permit mix looks like.
     """
+    if not permits:
+        raise ValueError("choose_targets: the recorded window produced no permits")
     counts: dict[str, int] = {}
     for p in permits:
         counts[cache_key(p["target_company"])] = counts.get(cache_key(p["target_company"]), 0) + 1
@@ -300,6 +379,13 @@ def run_demo(store: CassetteStore, transport, args) -> tuple[dict, dict]:
     replay-side checks."""
     with tempfile.TemporaryDirectory() as td:
         P.DB_PATH = Path(td) / "cache.db"
+        # Keep pipeline log records out of the repo: importing cpp_config leaves
+        # LOG_DIR pointing at REPO/logs, and the run emits log records that a
+        # lazy handler would materialise there (CI included).
+        C.LOG_DIR = Path(td) / "logs"
+        # MX verdicts are memoised on the module; a stale entry from an earlier
+        # run in this process would skip a recorded DoH request.
+        C._mx_cache.clear()
         conn = P.init_db()
         try:
             n_tract = P.load_dynamic_tract_builders(conn, days=365, min_permits=15)
@@ -323,16 +409,28 @@ def run_demo(store: CassetteStore, transport, args) -> tuple[dict, dict]:
 
     deduped = P.dedupe_leads(leads_pass2)
     groups: dict[str, list] = {}
-    for x in leads_pass2:
+    for x in deduped:
         groups.setdefault(cache_key(x.company_name), []).append(x)
-    rollups = []
+    rollups, extra_permits_total = [], 0
     for key, group in groups.items():
-        if len(group) > 1:
+        lead = group[0]
+        extras = lead.extra_permits or []
+        if extras:
+            extra_permits_total += len(extras)
+            combined = (lead.permit_value or 0) + sum((e.get("permit_value") or 0) for e in extras)
             rollups.append({
-                "company": group[0].company_name,
-                "permits": len(group),
-                "combined_value": round(sum(x.permit_value or 0 for x in group), 2),
+                "company": lead.company_name,
+                "permits": 1 + len(extras),
+                "combined_value": round(combined, 2),
             })
+    # The roll-up must be visible in the committed row itself: dedupe_leads
+    # appends a "[+N more permit(s) this window, $X combined]" suffix and carries
+    # the folded permits in lead.extra_permits. Counted on the DEDUPED leads so a
+    # broken dedupe_leads cannot satisfy the check.
+    suffix_ok = all(
+        (not (l.extra_permits or []))
+        or (f"[+{len(l.extra_permits)} more permit(s) this window" in (l.description or ""))
+        for l in deduped)
     gc, sub = P.filter_client_splits(deduped)
     review, excluded = P.select_review(deduped, gc, sub)
     contactable = sum(1 for x in deduped if x.phone or x.email or x.website)
@@ -361,8 +459,11 @@ def run_demo(store: CassetteStore, transport, args) -> tuple[dict, dict]:
             "leads_before": len(leads_pass2),
             "leads_after": len(deduped),
             "rollup_companies": len(rollups),
+            "rollup_extra_permits": extra_permits_total,
+            "rollup_suffix_visible": suffix_ok,
             "rollup_example": rollups[:3],
         },
+        "coverage": P.coverage_counts(deduped),
         "splits": {
             "needs_builder": len(gc),
             "subtrade": len(sub),
@@ -375,6 +476,7 @@ def run_demo(store: CassetteStore, transport, args) -> tuple[dict, dict]:
         "served_pass1": served_pass1,
         "served_pass2_delta": served_pass2 - served_pass1,
         "served_total": served_pass2,
+        "pass2_identical": leads_pass1 == leads_pass2,
         "misses": getattr(transport, "misses", []),
     }
     return evidence, runtime
@@ -392,6 +494,9 @@ def main(argv=None) -> int:
     parser.add_argument("--building-limit", type=int, default=40)
     parser.add_argument("--dev-limit", type=int, default=20)
     parser.add_argument("--enrich", type=int, default=10, help="companies to enrich (default 10)")
+    parser.add_argument("--refresh", action="store_true",
+                        help="replay only: rewrite committed run-output.json even if it "
+                             "differs (evidence-schema migrations; never for CI)")
     args = parser.parse_args(argv)
     args.mode = "record" if args.record else "replay"
 
@@ -416,8 +521,20 @@ def main(argv=None) -> int:
         store = CassetteStore()
         transport = install_transport(store, "record")
         real_days_ago = days_ago_iso  # the real one, captured before any freezing
-        evidence, runtime = run_demo(store, transport, args)
         frozen = {str(args.days): real_days_ago(args.days), "365": real_days_ago(365)}
+        frozen_now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        # Freeze BEFORE the run with exactly the values the cassettes will store:
+        # the Socrata cutoff URLs and the cache stamps are then identical no
+        # matter where midnight falls during a long record.
+        store.meta = {"frozen_days_ago_iso": frozen, "frozen_now": frozen_now}
+        restore = freeze_time(store)
+        try:
+            evidence, runtime = run_demo(store, transport, args)
+        finally:
+            restore()
+            httpx.Client = _RealClient
+            if getattr(httpx, "_api", None) is not None:
+                httpx._api.Client = _RealClient
         record_args = {"days": args.days, "building_limit": args.building_limit,
                        "dev_limit": args.dev_limit, "enrich": args.enrich}
         if serper_key:
@@ -426,9 +543,7 @@ def main(argv=None) -> int:
             if leaked:
                 print("ABORT: SERPER_API_KEY value found in cassette bodies", file=sys.stderr)
                 return 1
-        store.save(CASSETTES, frozen,
-                   datetime.now(timezone.utc).isoformat(timespec="seconds"),
-                   record_args=record_args)
+        store.save(CASSETTES, frozen, frozen_now, record_args=record_args)
         (OUTDIR / "run-output.json").write_text(json.dumps(evidence, indent=1), encoding="utf-8")
         print(json.dumps(evidence, indent=1))
         print(f"record run: {runtime['served_total']} HTTP requests recorded "
@@ -442,31 +557,43 @@ def main(argv=None) -> int:
     for field in ("days", "building_limit", "dev_limit", "enrich"):
         if field in recorded:
             setattr(args, field, recorded[field])  # replay uses the recorded window
-    freeze_time(store)
+    freeze = freeze_time(store)
+    guard = no_network_guard()
     try:
-        with no_network_guard():
+        with guard:
             evidence, runtime = run_demo(store, transport, args)
-    except RuntimeError as exc:
+    except (RuntimeError, OfflineViolation) as exc:
         print(f"REPLAY FAILED: {exc}", file=sys.stderr)
         return 1
     finally:
+        freeze()
         httpx.Client = _RealClient
         if getattr(httpx, "_api", None) is not None:
             httpx._api.Client = _RealClient
 
+    master_rows = _csv_rows(OUTDIR / "recorded_master.csv")
     checks = [
         ("every HTTP request was served from a cassette", not transport.misses),
+        ("no blocked network call anywhere in the replay", not guard.blocked),
         ("second enrichment pass made zero HTTP requests (all from SQLite cache)",
          runtime["served_pass2_delta"] == 0),
+        ("cache read-back reproduced the first pass exactly", runtime["pass2_identical"]),
         ("dedupe left one row per company",
          evidence["dedupe"]["leads_after"]
-         == len({cache_key(x["company_name"]) for x in _csv_rows(OUTDIR / "recorded_master.csv")})),
+         == len({cache_key(x["company_name"]) for x in master_rows})),
+        ("master CSV has exactly the deduped leads", len(master_rows)
+         == evidence["dedupe"]["leads_after"]),
+        ("dedupe shrank the lead list", evidence["dedupe"]["leads_after"]
+         < evidence["dedupe"]["leads_before"]),
         ("the recorded window contains at least one multi-permit company",
          evidence["dedupe"]["rollup_companies"] >= 1),
+        ("folded permits are visible in the deduped rows",
+         evidence["dedupe"]["rollup_extra_permits"] >= 1
+         and evidence["dedupe"]["rollup_suffix_visible"]),
     ]
     committed = json.loads((OUTDIR / "run-output.json").read_text(encoding="utf-8"))
     checks.append(("recomputed evidence matches the committed run-output.json",
-                   evidence == committed))
+                   args.refresh or evidence == committed))
     failures = [label for label, ok in checks if not ok]
     for label, ok in checks:
         print(f"{'PASS' if ok else 'FAIL'}  {label}")
