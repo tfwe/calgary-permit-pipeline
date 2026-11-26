@@ -19,6 +19,7 @@ on things that must never be true of a list you would send someone.
 
 import argparse
 import csv
+import sqlite3
 import sys
 from pathlib import Path
 
@@ -26,6 +27,7 @@ REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO))
 
 import pipeline as P  # noqa: E402
+
 
 def load(path):
     if not path.exists():
@@ -41,12 +43,39 @@ def get(row, *names):
     return ""
 
 
+def activate_persisted_tract_builders(conn_path: Path, min_permits: int) -> int:
+    """Load the tract_builders table the live run persisted into cache.db.
+
+    The live pipeline discovers volume tract builders from permit frequency and
+    stores them in cache.db (see cpp_fetch.load_dynamic_tract_builders). Without
+    this load the QA gate only knew the static regex, so a dynamically discovered
+    builder could sit in a sellable CSV unchallenged. Reads only the committed
+    knowledge; never probes the network.
+    """
+    if not conn_path.exists():
+        return 0
+    conn = sqlite3.connect(conn_path)
+    try:
+        rows = conn.execute(
+            "SELECT name FROM tract_builders WHERE permits >= ?", (min_permits,)
+        ).fetchall()
+    except sqlite3.OperationalError:
+        return 0          # cache.db predates tract tracking, or the table is empty
+    finally:
+        conn.close()
+    P._DYNAMIC_TRACT_BUILDERS.update(name for (name,) in rows)
+    return len(rows)
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description="QA gate over the pipeline CSV outputs.")
     parser.add_argument("--dir", default=str(P.BASE),
                         help="directory holding calgary_*.csv (default: repository root)")
+    parser.add_argument("--tract-min-permits", type=int, default=15,
+                        help="permit/yr threshold for persisted tract builders (default: same as pipeline)")
     args = parser.parse_args(argv)
     base = Path(args.dir)
+    activate_persisted_tract_builders(base / "cache.db", args.tract_min_permits)
     MASTER = base / P.CSV_PATH.name
     SPLITS = {"needs_builder": base / P.GC_CSV_PATH.name, "subtrade": base / P.SUB_CSV_PATH.name}
     REVIEW = base / P.REVIEW_CSV_PATH.name

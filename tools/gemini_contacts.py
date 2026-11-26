@@ -69,11 +69,10 @@ DEFAULT_MODEL = "hydrogen"
 DEFAULT_LIMITS = {"hydrogen": 6, "neon": 2, "escalation": 1, "task": 2}
 POOLS = ("hydrogen", "neon", "escalation", "task")
 
-ROLE_LOCALS = frozenset({
-    "info", "contact", "admin", "office", "sales", "hello", "enquiries", "inquiries",
-    "general", "reception", "mail", "service", "accounts", "support", "team",
-    "marketing", "billing",
-})
+# Role-inbox stems come from the canonical set in cpp_config so the three
+# consumers (pipeline.email_status, cpp_export.CLIENT_ROLE_INBOXES, here) share
+# one source of truth and cannot drift apart.
+from cpp_config import _ROLE_LOCALS as ROLE_LOCALS  # noqa: E402
 PROMPT_HEAD = (
     "Search the web. Calgary Alberta businesses. Reply ONE line each, format: "
     "NAME | named person | published email | source URL. Use UNKNOWN for anything "

@@ -334,17 +334,40 @@ def setup_logging() -> logging.Logger:
     if logger.handlers:
         return logger
     logger.setLevel(logging.INFO)
-    LOG_DIR.mkdir(parents=True, exist_ok=True)
-    handler = logging.handlers.RotatingFileHandler(
-        LOG_DIR / "pipeline.log", maxBytes=1_000_000, backupCount=5, encoding="utf-8"
-    )
-    handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
-    logger.addHandler(handler)
+    # The file handler is lazy: importing cpp_config (directly or through any
+    # cpp_* module) must have no filesystem side effect, so logs/ is created
+    # and opened only when the first record is actually logged.
+    logger.addHandler(_LazyFileHandler())
     return logger
+
+
+class _LazyFileHandler(logging.Handler):
+    """Defer LOG_DIR creation and the log file open until the first record."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._real: logging.Handler | None = None
+
+    def _ensure(self) -> logging.Handler:
+        LOG_DIR.mkdir(parents=True, exist_ok=True)
+        handler = logging.handlers.RotatingFileHandler(
+            LOG_DIR / "pipeline.log", maxBytes=1_000_000, backupCount=5, encoding="utf-8"
+        )
+        handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
+        return handler
+
+    def emit(self, record: logging.LogRecord) -> None:
+        if self._real is None:
+            self._real = self._ensure()
+        self._real.handle(record)
 
 
 logger = setup_logging()
 
-_ROLE_LOCALS = {"info", "sales", "contact", "admin", "office", "hello", "team",
-                "support", "reception", "enquiries", "inquiries", "accounts",
-                "marketing", "billing"}
+# Canonical role-inbox stems, shared by every consumer so the three sites that
+# grade role inboxes (pipeline.email_status, the client-sheet tiers in
+# cpp_export, and tools/gemini_contacts.py) cannot drift apart again. Stems
+# cover exact matches (info@) and suffixed forms (info., info-, info_).
+_ROLE_LOCALS = frozenset({"info", "sales", "contact", "admin", "office", "hello", "team",
+                          "support", "reception", "enquiries", "inquiries", "accounts",
+                          "marketing", "billing", "general", "mail", "service"})

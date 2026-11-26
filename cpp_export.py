@@ -40,6 +40,7 @@ __all__ = [
     "_client_reach",
     "_client_chip",
     "_client_extra_lines",
+    "_client_display",
     "_client_card",
     "_client_row",
     "export_client_html",
@@ -189,12 +190,10 @@ def _maps_href(address: str) -> str:
     return f"https://www.google.com/maps/search/?api=1&query={query}"
 
 
-# Client sheet: tiered cards. Role inboxes and tier
-# rules live here so tests can exercise them directly.
-CLIENT_ROLE_INBOXES = frozenset({
-    "info", "contact", "admin", "office", "sales", "hello", "enquiries", "inquiries",
-    "general", "reception", "mail", "service", "accounts", "support", "team",
-})
+# Client sheet: tiered cards. Role inboxes and tier rules live here so tests
+# can exercise them directly. The stems come from the canonical set in
+# cpp_config (_ROLE_LOCALS) so the three role-inbox consumers cannot drift.
+CLIENT_ROLE_INBOXES = _ROLE_LOCALS
 
 # The five real pitch_for() strings. Any other angle gets no chip.
 CLIENT_PITCH_CHIPS = {
@@ -350,11 +349,17 @@ def _client_extra_lines(x: Lead) -> list[str]:
     return lines
 
 
+def _client_display(x: Lead) -> str:
+    """Company name as the client sheet should show it: numbered-shell names are
+    replaced by their unmasked tradename, matching _client_card, _client_row and
+    the top-5 strip."""
+    if NUMBERED_RE.match(x.company_name or "") and x.unmasked_tradename:
+        return x.unmasked_tradename
+    return x.company_name
+
+
 def _client_card(x: Lead, n: int) -> str:
-    display = (x.unmasked_tradename
-               if NUMBERED_RE.match(x.company_name or "") and x.unmasked_tradename
-               else x.company_name)
-    company = _client_esc(display)
+    company = _client_esc(_client_display(x))
     site = (x.website or "").strip()
     host = _host(site) if site else ""
     name = (f'<a href="{html.escape(site)}" target="_blank" rel="noopener">{company}</a>'
@@ -397,7 +402,7 @@ def _client_card(x: Lead, n: int) -> str:
 
 
 def _client_row(x: Lead, n: int) -> str:
-    company = _client_esc(x.company_name)
+    company = _client_esc(_client_display(x))
     site = (x.website or "").strip()
     name = (f'<a href="{html.escape(site)}" target="_blank" rel="noopener">{company}</a>'
             if site else company)
@@ -445,7 +450,7 @@ def export_client_html(leads: list[Lead], path: Path, title: str) -> None:
     if full:
         items = "".join(
             f'<li><span class="s-val">{_client_money(x.permit_value)}</span>'
-            f'<span class="s-co">{_client_esc(x.company_name)}</span>'
+            f'<span class="s-co">{_client_esc(_client_display(x))}</span>'
             f'<span class="s-why">{_client_reach(x, compact=True)}</span></li>'
             for x in full[:5])
         strip = (f'  <div class="start"><h2>Top projects with contact details</h2>'
@@ -612,7 +617,9 @@ def filter_client_splits(leads: list[Lead], include_tract_builders: bool = False
     gc_leads = [
         x for x in contactable
         if x.lead_type in {"NEEDS_GC", "EARLY_DESIGN"}
-        and not is_volume_tract_builder(x.company_name, x.unmasked_tradename)
+        # The flag reads both splits symmetrically: opting in rescues tract
+        # builders in the GC list the same way select_review honours it.
+        and (include_tract_builders or not is_volume_tract_builder(x.company_name, x.unmasked_tradename))
     ]
     sub_leads = [
         x for x in contactable

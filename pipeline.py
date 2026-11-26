@@ -607,13 +607,16 @@ def run_via_task_stage(conn: sqlite3.Connection, leads: list, *, flag: bool, env
 
 def coverage_counts(leads: list) -> dict:
     """Coverage of the (deduped) lead list, for week-over-week trend lines.
-    named = a person is attached; verified = a non-role email; role_only = a
-    role-inbox email (info@, sales@...); blanks = no email at all."""
+    named = a person is attached; verified = a non-role email whose domain has
+    MX (an undeliverable no_mx address is never verified contact); role_only =
+    a role-inbox email (info@, sales@...); blanks = no email at all."""
     emails = [x for x in leads if x.email]
     return {
         "companies": len(leads),
         "named_contacts": sum(1 for x in leads if x.contact_name),
-        "verified_emails": sum(1 for x in emails if x.email_status not in _ROLE_STATUSES),
+        "verified_emails": sum(1 for x in emails
+                               if x.email_status not in _ROLE_STATUSES
+                               and x.email_status != "no_mx"),
         "role_only_emails": sum(1 for x in emails if x.email_status in _ROLE_STATUSES),
         "blanks": sum(1 for x in leads if not x.email),
     }
