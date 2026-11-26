@@ -35,8 +35,9 @@ sheets) and refreshes `fixtures/sample_needs_builder.csv` and
 `fixtures/sample_subtrade_leads.csv`. It then runs the QA gate
 (`tools/audit_outputs.py`) over the output. The demo drives the same split,
 review, export and audit functions the live pipeline uses, so it exercises the
-output stage end to end. Only the Socrata ingest and web enrichment are skipped,
-because they need the network.
+output stage end to end. It does not run live ingest, web enrichment, the SQLite
+cache, `build_leads` reclassification or `dedupe_leads`; those need the network
+or the live pipeline path.
 
 ## Results
 
@@ -59,13 +60,13 @@ because they need the network.
 
 | Stage | Code | What happens |
 |---|---|---|
-| Ingest | `pipeline.py` `fetch_building_permits`, `fetch_dev_permits` | Public Socrata endpoints, no key. Value band `$50k–$3M` by default. |
-| Classify | `build_leads`, `pitch_for` | Each permit gets a lead type: `NEEDS_GC`, `SUBTRADE_PITCH`, `EARLY_DESIGN` or `SUBCONTRACTOR` (a trade, excluded). Architect and design firms get a bid-list pitch instead of a GC pitch. One row per company. |
-| Enrich | `enrich_company`, `licence_lookup`, `search_web`, `scrape_contacts` | Licence match, then Serper Places (keyed) or a keyless fallback, then page scraping. Candidate URLs are validated against the company name, so lookalike domains are rejected. |
-| Verify | `domain_has_mx`, `valid_email`, `_reachable` | Email is graded by DNS MX. A company is sellable only with a usable phone or a deliverable email. |
-| Cache | `init_db`, `cache_get`, `cache_put` | `cache.db`. Records with a contact live about 90 days. Blank ones retry after 7 days. A `kill_reason` column records why a company stayed blank. |
-| Split | `filter_client_splits`, `select_review` | Sellable GC list, sellable subtrade list, review pile. Trades and volume production builders are excluded by policy. |
-| Export | `export_csv`, `export_clean_client_csv`, `export_client_html`, `export_review_csv` | CSV and HTML outputs (see below). |
+| Ingest | `cpp_fetch.py` `fetch_building_permits`, `fetch_dev_permits` | Public Socrata endpoints, no key. Value band `$50k–$3M` by default. |
+| Classify | `build_leads` (`pipeline.py`), `pitch_for` (`cpp_export.py`) | Each permit gets a lead type: `NEEDS_GC`, `SUBTRADE_PITCH`, `EARLY_DESIGN` or `SUBCONTRACTOR` (a trade, excluded). Architect and design firms get a bid-list pitch instead of a GC pitch. One row per company. |
+| Enrich | `enrich_company`, `scrape_contacts` (`pipeline.py`); `licence_lookup`, `search_web` (`cpp_fetch.py`) | Licence match, then Serper Places (keyed) or a keyless fallback, then page scraping. Candidate URLs are validated against the company name, so lookalike domains are rejected. |
+| Verify | `domain_has_mx`, `valid_email` (`cpp_contacts.py`), `_reachable` (`cpp_export.py`) | Email is graded by DNS MX. A company is sellable only with a usable phone or a deliverable email. |
+| Cache | `init_db` (`pipeline.py`), `cache_get`, `cache_put` (`cpp_cache.py`) | `cache.db`. Records with a contact live about 90 days. Blank ones retry after 7 days. A `kill_reason` column records why a company stayed blank. |
+| Split | `filter_client_splits`, `select_review` (`cpp_export.py`) | Sellable GC list, sellable subtrade list, review pile. Trades and volume production builders are excluded by policy. |
+| Export | `export_csv`, `export_clean_client_csv`, `export_client_html`, `export_review_csv` (`cpp_export.py`) | CSV and HTML outputs (see below). |
 | Sync (optional) | `gog_sync`, `gog_sync_file` | Uploads to Google Sheets and Drive through the `gog` CLI. |
 | Enrich, LLM (optional) | `tools/gemini_contacts.py`, `tools/gemini_task_sheet.py` | Backfill named contacts for gap rows through an external chat-model bridge or a Gemini Task sheet. Accepts an email only when the literal address appears on a page the tool fetched itself. Budgeted per day. |
 | QA | `tools/audit_outputs.py` | Recomputes the invariants on the output CSVs: no duplicates, no junk URLs, no excluded trades, every sellable row reachable. |
@@ -73,7 +74,16 @@ because they need the network.
 Module layout:
 
 ```
-pipeline.py                 the pipeline (section-bannered; entry point main())
+pipeline.py                 orchestration: ingest-to-export flow, Sheets sync, entry point main();
+                            also init_db, enrich_company, scrape_contacts, build_leads
+cpp_config.py               constants, paths, EXIT_* codes, the Lead model, regexes, logging setup
+                            (moved here from pipeline.py); VOLUME_TRACT_BUILDERS_RE lives here
+cpp_cache.py                pure SQLite cache helpers: cache_key, cache_get, cache_put, cache age
+cpp_match.py                name and URL matching, contractor/subtrade heuristics, junk-URL filter
+cpp_fetch.py                network layer: Socrata permits, licence lookup, keyless search,
+                            Serper, fetch_page (fetch_building_permits / fetch_dev_permits live here)
+cpp_contacts.py             phone and email normalisation, MX check, contact extraction from sites
+cpp_export.py               split, review pile, CSV/HTML export, dedupe, pitch_for
 config.py                   every external-tool path and secret location, from env vars
 build_demo_data.py          synthetic demo: builds sample leads, runs real export + audit
 run.sh                      unattended runner: PATH, lock, per-run log, exit codes
@@ -125,14 +135,28 @@ Setup for the optional Google leg:
   Its keyring password is read from `~/.config/gogcli/exec-env.sh`.
 - `send-weekly-pdfs.sh` needs `chromium` and `pdfinfo` on `PATH`.
 
-Run `./run.sh --skip-gog` first. It exercises everything except Google.
+Run `./run.sh --skip-gog` first. It exercises everything except Google, but it
+still needs live Socrata, Serper and web access.
 
 ## Running
+
+There are two paths, and they are not interchangeable:
+
+- **Live: `pipeline.py`.** A network CLI. It has no `--offline` or `--demo`
+  flag. `--skip-gog` only disables the Google Workspace upload. Socrata
+  ingest, Serper and web enrichment, and DNS MX checks still run.
+- **Offline (1): `build_demo_data.py`.** It feeds 38 synthetic leads through the
+  post-enrichment output stage: `pitch_for`, `filter_client_splits`,
+  `select_review`, CSV and HTML export, and `tools/audit_outputs.py`. It does
+  **not** exercise live ingest, web enrichment, SQLite caching,
+  `build_leads` reclassification, or `dedupe_leads`.
+- **Offline (2): the test suite.** `pytest` and `tests/run_all.sh` block all
+  sockets through `tests/_env.py`.
 
 ```bash
 .venv/bin/python pipeline.py --skip-gog       # one run, no Google sync
 .venv/bin/python pipeline.py --days 7         # 7-day window, with Google sync
-./run.sh --skip-gog                           # unattended wrapper: lock, log, exit codes
+./run.sh --skip-gog                           # unattended wrapper: lock, log, exit codes (needs live network)
 ./run-weekly.sh                               # 7-day window plus yield floor, for a scheduler
 ```
 
@@ -198,7 +222,7 @@ No test is skipped.
   northern Alberta number on a Calgary permit usually means a wrong match.
 - **Rejected websites take their contacts with them.** A phone or email found on
   a site that fails name validation is discarded too, so it cannot leak into a sellable list.
-- **Public homebuilder names.** `VOLUME_TRACT_BUILDERS_RE` in `pipeline.py` lists
+- **Public homebuilder names.** `VOLUME_TRACT_BUILDERS_RE` in `cpp_config.py` lists
   large public homebuilders, which the sellable subtrade list excludes by policy.
   Edit it for your market.
 - **Cache file.** `cache.db` is local state and contains contact data. Don't publish it.
