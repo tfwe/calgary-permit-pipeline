@@ -9,7 +9,7 @@ SERPER_API_KEY= .venv/bin/python build_demo_data.py
 .venv/bin/python tools/generate_demo_report.py
 ```
 
-- Commit: `4041689` (short HEAD when the generator ran)
+- Commit: `e58e668` (short HEAD when the generator ran)
 - Network: none. The demo runs with `SERPER_API_KEY` empty and uses synthetic leads.
 - Output: `demo_output/` is gitignored and regenerated; `fixtures/sample_*.csv` are tracked.
 
@@ -65,10 +65,10 @@ Not exercised by this run:
 | `cpp_cache.py` | 97 |
 | `cpp_config.py` | 350 |
 | `cpp_contacts.py` | 217 |
-| `cpp_export.py` | 626 |
+| `cpp_export.py` | 624 |
 | `cpp_fetch.py` | 480 |
 | `cpp_match.py` | 409 |
-| **total** | **3017** |
+| **total** | **3015** |
 
 ## Open defects
 

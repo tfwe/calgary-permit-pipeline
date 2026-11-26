@@ -5,9 +5,8 @@ bounces, so it must not count as a contact channel.
 """
 
 import csv
+import tempfile
 from pathlib import Path
-
-import html
 
 import _env  # noqa: E402,F401  (fake tool paths + no-network guard)
 from _harness import P, check, check_eq, finish
@@ -71,9 +70,8 @@ check("print_summary prints the 'Leads:' line", "Leads:" in _summary_out.getvalu
 check_eq("sheet-state helpers are defined in pipeline",
          P._save_sheet_state.__module__, P.__name__)
 if P._save_sheet_state.__module__ == P.__name__:
-    import tempfile as _tempfile
     _orig_state_path = P.SHEETS_STATE_PATH
-    _state_dir = Path(_tempfile.mkdtemp(prefix="_test_sheet_state_"))
+    _state_dir = Path(tempfile.mkdtemp(prefix="_test_sheet_state_"))
     _probe_path = _state_dir / "state.json"
     try:
         P.SHEETS_STATE_PATH = _probe_path
@@ -97,10 +95,9 @@ check_eq("config failure has its own code", P.EXIT_CONFIG, 2)
 # A human pastes this into an email or prints it, so: tappable links, no internal
 # jargon, no empty-field placeholders, and every lead appears exactly once.
 import re as _re
-import tempfile as _tempfile
 from html.parser import HTMLParser as _HTMLParser
 
-_OUT = Path(_tempfile.mkdtemp(prefix="client_sheet_"))
+_OUT = Path(tempfile.mkdtemp(prefix="client_sheet_"))
 
 
 class _Texts(_HTMLParser):

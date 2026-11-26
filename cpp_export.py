@@ -1,13 +1,11 @@
 """Export/formatting layer and lead post-processing for the Calgary pipeline.
 
-Verbatim move out of pipeline.py (behaviour-preserving split). pipeline.py
-star-imports this module, so every name below stays reachable as P.<name>.
+pipeline.py star-imports this module, so every name below stays reachable as P.<name>.
 """
 from __future__ import annotations
 
 import csv
 import html
-import json
 import re
 from datetime import datetime
 from pathlib import Path
@@ -91,7 +89,7 @@ def export_csv(leads: list[Lead], path: Path) -> None:
 
 
 def export_clean_client_csv(leads: list[Lead], path: Path) -> None:
-    """11-column, zero-jargon CSV ready to send straight to Calgary contractors."""
+    """13-column, zero-jargon CSV ready to send straight to Calgary contractors."""
     headers = [
         "Applied Date", "Permit #", "Address", "Community",
         "Est. Project Value", "Project Description",

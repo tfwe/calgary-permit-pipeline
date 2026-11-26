@@ -1,5 +1,5 @@
 """Network, search and licence layer: Socrata, licence lookup, keyless search,
-Serper, and the page fetcher. Moved verbatim from pipeline.py."""
+Serper, and the page fetcher."""
 from __future__ import annotations
 
 import base64
