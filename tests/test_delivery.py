@@ -48,6 +48,21 @@ check("client CSV carries Email Status", "Email Status" in rows[0])
 check("client CSV rows match the header width", all(len(r) == 13 for r in rows[1:]))
 tmp.unlink()
 
+# --- console summary: print_summary must render, not raise NameError ----------
+# print_summary builds a rich Table; cpp_export must import Table itself. No other
+# test called print_summary, so a missing import went unnoticed until a real run.
+import contextlib as _contextlib
+import io as _io
+_summary_out = _io.StringIO()
+_summary_err = None
+try:
+    with _contextlib.redirect_stdout(_summary_out):
+        P.print_summary([lead(phone="4031234567")])
+except Exception as _e:  # noqa: BLE001
+    _summary_err = _e
+check("print_summary runs without raising", _summary_err is None)
+check("print_summary prints the 'Leads:' line", "Leads:" in _summary_out.getvalue())
+
 # --- exit codes are distinct so an unattended runner can alert by class ------
 check_eq("exit codes are unique",
          len({P.EXIT_OK, P.EXIT_NO_PERMITS, P.EXIT_CONFIG, P.EXIT_LOW_YIELD, P.EXIT_UPLOAD}), 5)

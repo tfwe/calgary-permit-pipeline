@@ -14,6 +14,7 @@ from pathlib import Path
 from urllib.parse import quote_plus
 
 import config
+from rich.table import Table
 
 from cpp_config import *
 from cpp_cache import *
