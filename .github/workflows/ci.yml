@@ -34,3 +34,8 @@ jobs:
         env:
           SERPER_API_KEY: ""
         run: python build_demo_data.py
+
+      - name: Offline recorded-HTTP demo (replay)
+        env:
+          SERPER_API_KEY: recorded-cassette-replay
+        run: python tools/demo_recorded.py --replay

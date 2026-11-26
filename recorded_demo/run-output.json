@@ -1,0 +1,39 @@
+{
+ "cassette_file": "fixtures/http/cassettes.json",
+ "cassettes": 66,
+ "ingest": {
+  "building_permits": 40,
+  "dev_permits": 20,
+  "total_permits": 60,
+  "companies_enriched": 10,
+  "dynamic_tract_builders": 41
+ },
+ "caching": {
+  "cache_rows": 10,
+  "kill_reasons": {
+   "": 3,
+   "no places match and no validated search result": 3,
+   "site found, no phone or email on it": 2,
+   "site rejected by name-safety rules": 2
+  }
+ },
+ "dedupe": {
+  "leads_before": 12,
+  "leads_after": 10,
+  "rollup_companies": 1,
+  "rollup_example": [
+   {
+    "company": "BROOKFIELD RESIDENTIAL (ALBERTA)",
+    "permits": 3,
+    "combined_value": 721230.24
+   }
+  ]
+ },
+ "splits": {
+  "needs_builder": 3,
+  "subtrade": 0,
+  "review": 6,
+  "policy_excluded": 1,
+  "contactable": 4
+ }
+}

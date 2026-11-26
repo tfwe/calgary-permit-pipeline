@@ -6,15 +6,18 @@ the ones worth approaching a business about, enriches each company with public
 contact details, caches the results in SQLite, and writes client-ready CSV and
 HTML lists. Optionally it syncs those lists to Google Sheets and Drive.
 
-The repository ships **no real data**. Everything under `fixtures/` and
-`demo_output/` is synthetic, and `build_demo_data.py` regenerates it. The demo
-runs fully offline and needs no API keys.
+The repository ships **no secrets**. `demo_output/` is synthetic and
+`build_demo_data.py` regenerates it. `fixtures/http/cassettes.json` holds
+recorded responses from the public surfaces the pipeline reads (City of Calgary
+open data, company contact pages, DNS-over-HTTPS), captured once and replayed
+offline by `tools/demo_recorded.py --replay`; CI replays it on every push.
 
 ## Quick demo (no keys, no network)
 
 ```bash
 python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
 .venv/bin/python build_demo_data.py
+.venv/bin/python tools/demo_recorded.py --replay
 ```
 
 Expected output:
@@ -36,8 +39,21 @@ sheets) and refreshes `fixtures/sample_needs_builder.csv` and
 (`tools/audit_outputs.py`) over the output. The demo drives the same split,
 review, export and audit functions the live pipeline uses, so it exercises the
 output stage end to end. It does not run live ingest, web enrichment, the SQLite
-cache, `build_leads` reclassification or `dedupe_leads`; those need the network
-or the live pipeline path.
+cache, `build_leads` reclassification or `dedupe_leads`.
+
+For those stages there is the recorded demo:
+
+```bash
+.venv/bin/python tools/demo_recorded.py --replay
+```
+
+It drives the real pipeline path — Socrata permit ingest, licence unmask, web
+enrichment, SQLite caching, `build_leads` reclassification and
+`dedupe_leads` — entirely offline, serving every HTTP request from the
+committed cassettes. Any request without a cassette is a hard error, a socket
+guard makes any real connection attempt fail, and the second enrichment pass
+must make zero HTTP requests (the cache answers everything). Record mode
+(`--record`) captured those cassettes once against the live public surfaces.
 
 ## Results
 
@@ -45,9 +61,15 @@ or the live pipeline path.
 - Segments: needs_builder=18, subtrade=16, review=2, policy_excluded=2.
 - Contact coverage: needs_builder 18 with phone/email 18; subtrade 16 with phone/email 16.
 - QA gate: reported "no problems found".
+- Recorded-HTTP replay (fully offline, no keys): 60 real permits ingested,
+  10 companies enriched through the real search/scrape/MX path, 4 with contact
+  details, SQLite cache fully serving the second pass (0 HTTP requests),
+  dedupe folding a 3-permit builder into one row. See `REPORT-DEMO.md`.
 - The live pipeline's SQLite cache holds around 300 companies.
 - Tests: around 2,900 lines of tests pin recall behaviour with network access blocked, so changes to recall show up as test failures.
-- Not covered by the demo: live Socrata ingest and web enrichment, which need network access.
+- Not covered offline: Google Sheets sync and the Gemini contact bridge (they
+  need secrets), and anything that changed on the live surfaces after the
+  cassettes were recorded.
 
 ## Architecture
 
@@ -90,9 +112,11 @@ run.sh                      unattended runner: PATH, lock, per-run log, exit cod
 run-weekly.sh               scheduler entry point: 7-day window and yield floor
 send-weekly-pdfs.sh         render the HTML sheets to PDF and email them (optional)
 tools/audit_outputs.py      post-run CSV QA gate
+tools/demo_recorded.py      recorded-HTTP offline demo: --record / --replay over committed cassettes
 tools/gemini_contacts.py    optional named-contact backfill (bridge or Gemini Task)
 tools/gemini_task_sheet.py  helpers for the Gemini Task path
 fixtures/                   committed synthetic sample CSVs
+fixtures/http/              committed HTTP cassettes the recorded demo replays
 tests/                      pytest suite (fixtures are synthetic; network is blocked)
 ```
 
@@ -150,7 +174,11 @@ There are two paths, and they are not interchangeable:
   `select_review`, CSV and HTML export, and `tools/audit_outputs.py`. It does
   **not** exercise live ingest, web enrichment, SQLite caching,
   `build_leads` reclassification, or `dedupe_leads`.
-- **Offline (2): the test suite.** `pytest` and `tests/run_all.sh` block all
+- **Offline (2): `tools/demo_recorded.py --replay`.** It runs the full live
+  pipeline path against committed HTTP cassettes: ingest, enrichment, SQLite
+  caching and dedup, with zero network access. `--record` refreshes the
+  cassettes (it does use the network and optionally the Serper key once).
+- **Offline (3): the test suite.** `pytest` and `tests/run_all.sh` block all
   sockets through `tests/_env.py`.
 
 ```bash
