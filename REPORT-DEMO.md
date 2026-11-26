@@ -9,7 +9,7 @@ SERPER_API_KEY= .venv/bin/python build_demo_data.py
 .venv/bin/python tools/generate_demo_report.py
 ```
 
-- Commit: `220c750` (short HEAD when the generator ran)
+- Commit: `4041689` (short HEAD when the generator ran)
 - Network: none. The demo runs with `SERPER_API_KEY` empty and uses synthetic leads.
 - Output: `demo_output/` is gitignored and regenerated; `fixtures/sample_*.csv` are tracked.
 

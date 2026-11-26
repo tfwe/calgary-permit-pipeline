@@ -42,11 +42,14 @@ MODULES = ["pipeline.py"] + sorted(
 )
 
 
-def run(cmd, timeout=600):
+def run(cmd, timeout=600, extra_env=None):
     """Run a local command; return (returncode, stdout+stderr)."""
+    env = {**os.environ, "SERPER_API_KEY": ""}
+    if extra_env:
+        env.update(extra_env)
     proc = subprocess.run(
         cmd, cwd=ROOT, capture_output=True, text=True, timeout=timeout,
-        env={**os.environ, "SERPER_API_KEY": ""},
+        env=env,
     )
     return proc.returncode, proc.stdout + proc.stderr
 
@@ -78,10 +81,10 @@ def count_module_lines(path):
 
 def pytest_counts():
     """Collected test count from the --collect-only tail, plus the full-run summary."""
-    rc, out = run([PY, "-m", "pytest", "--collect-only", "-q", "-p", "no:cacheprovider"])
+    rc, out = run([sys.executable, "-m", "pytest", "--collect-only", "-q", "-p", "no:cacheprovider"])
     m = re.search(r"(\d+) tests? collected", out)
     collected = int(m.group(1)) if m else None
-    rc2, out2 = run([PY, "-m", "pytest", "-q", "-p", "no:cacheprovider"])
+    rc2, out2 = run([sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider"])
     summary = [l for l in out2.splitlines() if re.search(r"\b(passed|failed|error)", l)]
     last = summary[-1] if summary else ""
     # Strip the timing suffix ("in 1.23s") so the line is stable across runs.
@@ -90,7 +93,9 @@ def pytest_counts():
 
 
 def run_all_status():
-    rc, out = run(["bash", "tests/run_all.sh"])
+    # Inherit the generator's interpreter; otherwise run_all.sh falls back to
+    # system python3 on hosts without pytest and embeds a spurious failure.
+    rc, out = run(["bash", "tests/run_all.sh"], extra_env={"PYTHON": sys.executable})
     lines = [l for l in out.splitlines() if l.strip()]
     tail = lines[-1] if lines else ""
     return rc, tail
